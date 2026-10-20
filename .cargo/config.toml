@@ -1,0 +1,6 @@
+# Link the C runtime into the exe. Otherwise it imports VCRUNTIME140.dll, which
+# is not a protected KnownDLL: Windows would look for it next to the exe first
+# (e.g. in Downloads), allowing DLL planting, and it fails on PCs without the
+# Visual C++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

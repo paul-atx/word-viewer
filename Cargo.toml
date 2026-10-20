@@ -1,6 +1,6 @@
 [package]
 name = "word-viewer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Tiny read-only viewer for Word documents (.docx and .doc) on Windows"
 license = "MIT"

@@ -33,9 +33,24 @@ jobs:
           path: target/release/word-viewer.exe
           if-no-files-found: error
 
+  imports:
+    # The exe may only import DLLs Windows always loads from System32 (KnownDLLs
+    # and API sets), so nothing placed next to it can be loaded instead.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: word-viewer
+      - name: Check DLL imports
+        run: |
+          objdump -p word-viewer.exe | awk '/DLL Name:/ {print $3}' | tee imports.txt
+          bad=$(grep -viE '^(kernel32|user32|shell32|comdlg32|ntdll)\.dll$|^api-ms-win-' imports.txt || true)
+          if [ -n "$bad" ]; then echo "::error::DLL imports that could be planted: $bad"; exit 1; fi
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, imports]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -23,7 +23,7 @@ Documents are untrusted input, so the viewer is built to be safe to open them wi
 - **Memory-safe parsing.** All file parsing (zip, deflate, .docx XML, .doc compound files) is safe Rust with `unsafe` forbidden. Only the small Win32 window code uses `unsafe`, and it never touches file contents.
 - **No code paths from documents.** Document text is always escaped before display, so a file cannot inject RTF objects, fields, or links. Macros, embedded objects, and external references are never processed.
 - **Bounded work.** Input (64 MB), decompressed size (64 MB), and output (32 MB) are capped; zip bombs, cyclic sector chains, and overlapping text pieces are rejected.
-- **No DLL planting.** DLLs are only loaded from System32, never from the folder the exe sits in.
+- **No DLL planting.** The exe only imports DLLs that Windows always loads from System32 (the C runtime is linked in statically, and CI checks every build), and the RichEdit DLL is loaded from System32 explicitly.
 - **Crash-safe.** Arithmetic overflow is checked in release builds, and any parser failure shows "Could not read this file" instead of crashing.
 - **Tested against hostile input.** `tests/hostile.rs` runs malicious samples on every commit, and `fuzz/` contains a [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) target.
 
