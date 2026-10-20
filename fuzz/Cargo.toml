@@ -1,0 +1,22 @@
+[package]
+name = "word-viewer-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+word-viewer = { path = ".." }
+
+[[bin]]
+name = "to_rtf"
+path = "fuzz_targets/to_rtf.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

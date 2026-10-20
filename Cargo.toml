@@ -1,0 +1,16 @@
+[package]
+name = "word-viewer"
+version = "0.1.0"
+edition = "2021"
+description = "Tiny read-only viewer for Word documents (.docx and .doc) on Windows"
+license = "MIT"
+
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+# Integer overflow in a parser panics (and is caught) instead of silently wrapping.
+overflow-checks = true
