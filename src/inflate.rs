@@ -154,7 +154,7 @@ impl State<'_> {
     }
 }
 
-/// Inflate `inp`, which must decompress to exactly `size` bytes.
+/// Inflate raw DEFLATE data `inp`, which must decompress to exactly `size` bytes.
 pub fn inflate(inp: &[u8], size: usize) -> Option<Vec<u8>> {
     let mut s = State { inp, pos: 0, bitbuf: 0, bitcnt: 0, out: Vec::with_capacity(size), max: size };
     let run = |s: &mut State| -> R<()> {

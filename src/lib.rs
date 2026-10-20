@@ -9,7 +9,9 @@
 mod doc;
 mod docx;
 mod inflate;
+pub use inflate::inflate;
 mod rtf;
+mod text;
 mod zip;
 
 /// Largest input file accepted.
@@ -30,4 +32,9 @@ pub fn to_rtf(data: &[u8]) -> Option<String> {
         let xml = zip::extract(data, "word/document.xml", MAX_XML)?;
         Some(docx::render(&xml))
     }
+}
+
+/// Read a .docx or .doc file as plain-text paragraphs, or None if it can't be read.
+pub fn to_paragraphs(data: &[u8]) -> Option<Vec<String>> {
+    to_rtf(data).map(|rtf| text::paragraphs(&rtf))
 }
