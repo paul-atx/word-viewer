@@ -13,7 +13,7 @@ fn u32at(b: &[u8], o: usize) -> Option<u32> {
 }
 
 fn table(bytes: &[u8]) -> Vec<u32> {
-    bytes.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    bytes.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect()
 }
 
 /// A parsed OLE compound file.
@@ -104,7 +104,7 @@ impl<'a> Cfb<'a> {
 
     fn stream(&self, name: &str) -> Option<Vec<u8>> {
         let want: Vec<u16> = name.encode_utf16().collect();
-        for d in self.dir.chunks_exact(128) {
+        for d in self.dir.as_chunks::<128>().0 {
             let nl = u16at(d, 64)? / 2;
             if d[66] != 2 || nl != want.len() + 1 {
                 continue;
