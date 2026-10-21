@@ -11,7 +11,7 @@ const CP1252: [u16; 32] = [
 /// old Windows "ANSI" code page 1252.
 pub fn decode(data: &[u8]) -> String {
     let utf16 = |bytes: &[u8], le: bool| {
-        let units = bytes.chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) });
+        let units = bytes.as_chunks::<2>().0.iter().map(|&c| if le { u16::from_le_bytes(c) } else { u16::from_be_bytes(c) });
         char::decode_utf16(units).map(|r| r.unwrap_or('\u{FFFD}')).collect()
     };
     if let Some(rest) = data.strip_prefix(b"\xEF\xBB\xBF") {
