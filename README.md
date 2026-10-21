@@ -1,9 +1,10 @@
 # word-viewer
 
-A tiny, read-only viewer for Word documents on Windows. One ~300 KB exe, no installer, no dependencies.
+A tiny, read-only document viewer for Windows. One small exe, no installer, no dependencies.
 
-- Opens `.docx` (Word 2007+) and `.doc` (Word 97–2003)
-- Shows headings, bold, italic, underline, bullets, simple tables, and paragraph indents (`.doc` shows text only)
+- Opens Word (`.docx`, `.doc`), PDF, RTF, OpenDocument (`.odt`), EPUB, HTML, Markdown and plain text
+- Word documents show headings, bold, italic, underline, bullets, simple tables and indents; other formats show their text as paragraphs
+- PDFs: text is rebuilt into paragraphs (words hyphenated across lines joined, page numbers and running headers removed). Scanned PDFs have no text to show, and password-protected PDFs aren't supported yet
 - Never modifies the file; text can be selected and copied
 
 ## Use
@@ -20,9 +21,9 @@ gh attestation verify word-viewer.exe --repo paul-atx/word-viewer
 
 Documents are untrusted input, so the viewer is built to be safe to open them with:
 
-- **Memory-safe parsing.** All file parsing (zip, deflate, .docx XML, .doc compound files) is safe Rust with `unsafe` forbidden. Only the small Win32 window code uses `unsafe`, and it never touches file contents.
+- **Memory-safe parsing.** All file parsing (zip, deflate, .docx XML, .doc compound files, PDF, RTF, ODT, EPUB, HTML, text encodings) is safe Rust with `unsafe` forbidden. Only the small Win32 window code uses `unsafe`, and it never touches file contents.
 - **No code paths from documents.** Document text is always escaped before display, so a file cannot inject RTF objects, fields, or links. Macros, embedded objects, and external references are never processed.
-- **Bounded work.** Input (64 MB), decompressed size (64 MB), and output (32 MB) are capped; zip bombs, cyclic sector chains, and overlapping text pieces are rejected.
+- **Bounded work.** Input (64 MB; 1 GB for PDFs, which are mostly images), decompressed size, and output (32 MB) are capped; zip and PDF compression bombs, cyclic sector chains and page trees, runaway nesting, and overlapping text pieces are rejected.
 - **No DLL planting.** The exe only imports DLLs that Windows always loads from System32 (the C runtime is linked in statically, and CI checks every build), and the RichEdit DLL is loaded from System32 explicitly.
 - **Crash-safe.** Arithmetic overflow is checked in release builds, and any parser failure shows "Could not read this file" instead of crashing.
 - **Tested against hostile input.** `tests/hostile.rs` runs malicious samples on every commit, and `fuzz/` contains a [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) target.

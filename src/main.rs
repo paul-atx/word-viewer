@@ -11,8 +11,8 @@ fn main() {
 #[cfg(not(windows))]
 fn main() {
     let path = std::env::args().nth(1).expect("usage: word-viewer FILE");
-    let data = std::fs::read(path).expect("read failed");
-    match word_viewer::to_rtf(&data) {
+    let data = std::fs::read(&path).expect("read failed");
+    match word_viewer::to_rtf_named(&data, &path).ok() {
         Some(rtf) => print!("{rtf}"),
         None => std::process::exit(1),
     }
@@ -189,28 +189,33 @@ mod win {
 
     fn read_limited(path: &std::path::Path) -> Option<Vec<u8>> {
         let mut f = File::open(path).ok()?;
-        if f.metadata().ok()?.len() > word_viewer::MAX_FILE as u64 {
+        // the library applies each format's own limit; PDFs have the largest
+        if f.metadata().ok()?.len() > word_viewer::MAX_PDF as u64 {
             return None;
         }
         let mut data = Vec::new();
-        f.by_ref().take(word_viewer::MAX_FILE as u64 + 1).read_to_end(&mut data).ok()?;
+        f.by_ref().take(word_viewer::MAX_PDF as u64 + 1).read_to_end(&mut data).ok()?;
         Some(data)
     }
 
     fn load(path_w: &[u16]) {
         let path = std::path::PathBuf::from(std::ffi::OsString::from_wide(path_w));
-        // A parser bug becomes "could not read", never a crash.
-        let rtf = read_limited(&path)
-            .and_then(|d| std::panic::catch_unwind(|| word_viewer::to_rtf(&d)).ok().flatten());
         let name: String = path.file_name().map(|n| n.to_string_lossy().chars().take(200).collect()).unwrap_or_default();
+        // A parser bug becomes "could not read", never a crash.
+        let rtf = read_limited(&path).ok_or(word_viewer::ReadError::Unsupported).and_then(|d| {
+            std::panic::catch_unwind(|| word_viewer::to_rtf_named(&d, &name)).unwrap_or(Err(word_viewer::ReadError::Unsupported))
+        });
         let title = wide(&format!("{name} - Word Viewer"));
         unsafe { SetWindowTextW(WIN.load(Ordering::Relaxed), title.as_ptr()) };
-        show_rtf(rtf.as_deref().unwrap_or("{\\rtf1 Could not read this file as a Word document.}"));
+        match rtf {
+            Ok(rtf) => show_rtf(&rtf),
+            Err(e) => show_rtf(&format!("{{\\rtf1\\fs22 {}}}", e.message())),
+        }
     }
 
     fn open_dialog() {
         let mut file = [0u16; MAX_PATH];
-        let filter: Vec<u16> = "Word documents (*.docx, *.doc)\0*.docx;*.doc\0All files\0*.*\0\0".encode_utf16().collect();
+        let filter: Vec<u16> = "Documents (Word, PDF, RTF, ODT, EPUB, HTML, text)\0*.docx;*.doc;*.pdf;*.rtf;*.odt;*.epub;*.html;*.htm;*.txt;*.md\0All files\0*.*\0\0".encode_utf16().collect();
         let mut ofn: OpenFileName = unsafe { std::mem::zeroed() };
         ofn.size = std::mem::size_of::<OpenFileName>() as u32;
         ofn.owner = WIN.load(Ordering::Relaxed);
@@ -311,7 +316,7 @@ mod win {
                 let arg = *argv.add(1);
                 load(std::slice::from_raw_parts(arg, wlen(arg, 32768)));
             } else {
-                show_rtf("{\\rtf1\\fs22 Use File > Open (Ctrl+O), or drag a .docx or .doc file onto this window.}");
+                show_rtf("{\\rtf1\\fs22 Use File > Open (Ctrl+O), or drag a document onto this window.}");
             }
             if !argv.is_null() {
                 LocalFree(argv as *mut c_void);

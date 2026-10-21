@@ -157,8 +157,21 @@ impl State<'_> {
 /// Inflate raw DEFLATE data `inp`, which must decompress to exactly `size` bytes.
 pub fn inflate(inp: &[u8], size: usize) -> Option<Vec<u8>> {
     let mut s = State { inp, pos: 0, bitbuf: 0, bitcnt: 0, out: Vec::with_capacity(size), max: size };
-    let run = |s: &mut State| -> R<()> {
-        loop {
+    run(&mut s).ok()?;
+    (s.out.len() == size).then_some(s.out)
+}
+
+/// Inflate raw DEFLATE data of unknown size, keeping whatever decodes before an
+/// error or the end of the input (PDF streams are sometimes truncated), and
+/// never more than `max` bytes.
+pub fn inflate_partial(inp: &[u8], max: usize) -> Vec<u8> {
+    let mut s = State { inp, pos: 0, bitbuf: 0, bitcnt: 0, out: Vec::new(), max };
+    let _ = run(&mut s);
+    s.out
+}
+
+fn run(s: &mut State) -> R<()> {
+    loop {
             let last = s.bits(1)?;
             match s.bits(2)? {
                 0 => s.stored()?,
@@ -174,8 +187,5 @@ pub fn inflate(inp: &[u8], size: usize) -> Option<Vec<u8>> {
             if last == 1 {
                 return Ok(());
             }
-        }
-    };
-    run(&mut s).ok()?;
-    (s.out.len() == size).then_some(s.out)
+    }
 }

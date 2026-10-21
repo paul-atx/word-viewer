@@ -20,3 +20,10 @@ bench = false
 
 [workspace]
 members = ["."]
+
+[[bin]]
+name = "read"
+path = "fuzz_targets/read.rs"
+test = false
+doc = false
+bench = false

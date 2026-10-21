@@ -117,3 +117,108 @@ fn cyclic_compound_file_is_rejected() {
     z[516..520].copy_from_slice(&1u32.to_le_bytes());
     assert!(quick(|| word_viewer::to_rtf(&z)).is_none());
 }
+
+// ---- every other format (PDF, RTF, ODT, EPUB, HTML, text) ----
+
+fn read_quick(data: &[u8], name: &str) -> Result<Vec<String>, word_viewer::ReadError> {
+    quick(|| word_viewer::read(data, name))
+}
+
+const FIXTURES: [(&str, &[u8]); 6] = [
+    ("sample.pdf", include_bytes!("fixtures/sample.pdf")),
+    ("sample.rtf", include_bytes!("fixtures/sample.rtf")),
+    ("sample.odt", include_bytes!("fixtures/sample.odt")),
+    ("sample.epub", include_bytes!("fixtures/sample.epub")),
+    ("sample.html", include_bytes!("fixtures/sample.html")),
+    ("sample.txt", include_bytes!("fixtures/sample.txt")),
+];
+
+#[test]
+fn every_format_reads() {
+    for (name, data) in FIXTURES {
+        let p = word_viewer::read(data, name).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert!(p.join(" ").contains("quick") || p.join(" ").contains("The quick"), "{name}: {p:?}");
+    }
+}
+
+#[test]
+fn every_format_survives_truncation_and_corruption() {
+    for (name, data) in FIXTURES {
+        for n in 0..data.len() {
+            let _ = word_viewer::read(&data[..n], name);
+        }
+        for i in 0..data.len() {
+            let mut d = data.to_vec();
+            d[i] ^= 0xFF;
+            let _ = word_viewer::read(&d, name);
+        }
+    }
+}
+
+#[test]
+fn pdf_decompression_bomb_is_capped() {
+    // 300 MB of zeros behind one stream; the decode budget stops it
+    let r = read_quick(include_bytes!("fixtures/bomb.pdf"), "bomb.pdf");
+    assert!(r.is_err());
+}
+
+fn pdf(objs: &[&str]) -> Vec<u8> {
+    let mut p = String::from("%PDF-1.4\n");
+    for (i, o) in objs.iter().enumerate() {
+        p.push_str(&format!("{} 0 obj\n{}\nendobj\n", i + 1, o));
+    }
+    p.push_str("trailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    p.into_bytes()
+}
+
+#[test]
+fn pdf_structural_attacks() {
+    let text = "<< /Length 30 >>\nstream\nBT /F1 12 Tf (Hello) Tj ET\nendstream";
+    let font = "<< /Type /Font /Subtype /Type1 /Encoding /WinAnsiEncoding >>";
+    let cases: Vec<Vec<u8>> = vec![
+        // a page tree that contains itself
+        pdf(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [2 0 R 2 0 R] >>"]),
+        // nesting far past any sane depth
+        format!("%PDF-1.4\n1 0 obj\n{}\nendobj\n", "[".repeat(200_000)).into_bytes(),
+        format!("%PDF-1.4\n1 0 obj\n{}\nendobj\n", "<< /A ".repeat(100_000)).into_bytes(),
+        // a stream length beyond the file and beyond usize
+        pdf(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] >>", "<< /Type /Page /Contents 4 0 R >>", "<< /Length 99999999999999999999 >>\nstream\nBT ET"]),
+        // an object stream claiming a billion objects
+        pdf(&["<< /Type /ObjStm /N 1000000000 /First 5 /Length 9 >>\nstream\n1 0 2 0\nendstream"]),
+        // fonts with gigantic width ranges and a CMap range over every code
+        pdf(&[
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] >>",
+            "<< /Type /Page /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            text,
+            "<< /Type /Font /Subtype /Type0 /DescendantFonts [6 0 R] /ToUnicode 7 0 R >>",
+            "<< /W [0 4294967295 500 0 [1 2 3]] /DW 1000 >>",
+            "<< /Length 80 >>\nstream\nbegincodespacerange <0000> <FFFF> endcodespacerange beginbfrange <0000> <FFFFFFFF> <0041> endbfrange\nendstream",
+        ]),
+        // numbers before nested arrays: reference lookahead must not re-parse them
+        // (this took exponential time before; found by fuzzing)
+        format!("%PDF-1.4\n1 0 obj\n{}{}\nendobj\n", "[1 2 ".repeat(40), "]".repeat(40)).into_bytes(),
+        // references that point at each other forever
+        pdf(&["<< /Type /Catalog /Pages 2 0 R >>", "3 0 R", "2 0 R"]),
+        // a million tiny pages
+        {
+            let kids: String = (0..1_000_000).map(|_| "3 0 R ").collect();
+            pdf(&["<< /Type /Catalog /Pages 2 0 R >>", &format!("<< /Type /Pages /Kids [{kids}] >>"), "<< /Type /Page /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>", text, font])
+        },
+    ];
+    for c in cases {
+        let _ = read_quick(&c, "attack.pdf");
+    }
+}
+
+#[test]
+fn other_format_attacks() {
+    let _ = read_quick(&[b"{\\rtf1 ".as_slice(), &b"{".repeat(1_000_000)].concat(), "a.rtf");
+    let _ = read_quick(b"{\\rtf1 \\bin99999999999999999999 x}", "a.rtf");
+    let _ = read_quick(&[b"<html>".as_slice(), &b"<".repeat(5_000_000)].concat(), "a.html");
+    let _ = read_quick(&[b"<html><script>".as_slice(), &b"x".repeat(5_000_000)].concat(), "a.html");
+    let _ = read_quick(&"&".repeat(5_000_000).into_bytes(), "a.html");
+    // binary junk is not "text"
+    let junk: Vec<u8> = (0..100_000u32).map(|i| (i.wrapping_mul(2654435761) >> 24) as u8).collect();
+    assert!(read_quick(&junk, "junk.txt").is_err());
+}
