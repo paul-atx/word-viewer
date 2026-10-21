@@ -189,21 +189,27 @@ fn named(e: &str) -> Option<char> {
     })
 }
 
-/// Paragraphs of readable text from an HTML or XHTML page. Block elements start
-/// new paragraphs; scripts, styles, the document head and navigation are skipped.
-pub fn html_paragraphs(html: &str) -> Vec<String> {
+/// A paragraph, and whether it is a major heading.
+pub type Block = (String, bool);
+
+/// Paragraphs of readable text from an HTML or XHTML page, each marked if it's a
+/// major heading (h1 to h3). Block elements start new paragraphs; scripts, styles,
+/// the document head and navigation are skipped.
+pub fn html_blocks(html: &str) -> Vec<Block> {
     const BLOCKS: [&str; 22] = [
         "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "br", "tr", "section", "article",
         "header", "footer", "pre", "hr", "dt", "dd", "figcaption", "caption",
     ];
     const SKIP: [&str; 9] = ["head", "script", "style", "nav", "svg", "math", "noscript", "template", "title"];
+    const HEADINGS: [&str; 3] = ["h1", "h2", "h3"];
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut skip: Vec<String> = Vec::new();
-    let flush = |cur: &mut String, out: &mut Vec<String>| {
+    let mut heading = false; // inside h1-h3
+    let flush = |cur: &mut String, out: &mut Vec<Block>, heading: bool| {
         let p = cur.split_whitespace().collect::<Vec<_>>().join(" ");
         if !p.is_empty() {
-            out.push(p);
+            out.push((p, heading));
         }
         cur.clear();
     };
@@ -213,7 +219,11 @@ pub fn html_paragraphs(html: &str) -> Vec<String> {
             if !self_closing && SKIP.contains(&local.as_str()) {
                 skip.push(local);
             } else if skip.is_empty() && BLOCKS.contains(&local.as_str()) {
-                flush(&mut cur, &mut out);
+                flush(&mut cur, &mut out, heading);
+                if HEADINGS.contains(&local.as_str()) {
+                    heading = true;
+                    out.push((String::new(), true)); // marks the start of this heading
+                }
             }
         }
         Ev::End(name) => {
@@ -221,7 +231,10 @@ pub fn html_paragraphs(html: &str) -> Vec<String> {
             if skip.last().is_some_and(|s| s == local) {
                 skip.pop();
             } else if skip.is_empty() && BLOCKS.contains(&local) {
-                flush(&mut cur, &mut out);
+                flush(&mut cur, &mut out, heading);
+                if HEADINGS.contains(&local) {
+                    heading = false;
+                }
             }
         }
         Ev::Text(t) => {
@@ -230,8 +243,22 @@ pub fn html_paragraphs(html: &str) -> Vec<String> {
             }
         }
     });
-    flush(&mut cur, &mut out);
-    out
+    flush(&mut cur, &mut out, heading);
+    // a heading split into lines ("<h2>Chapter I<br/>The Tomb</h2>") becomes one
+    let mut merged: Vec<Block> = Vec::new();
+    for (p, h) in out {
+        match merged.last_mut() {
+            Some((last, true)) if h && !p.is_empty() => {
+                if !last.is_empty() {
+                    last.push_str(" · ");
+                }
+                last.push_str(&p);
+            }
+            _ => merged.push((p, h)),
+        }
+    }
+    merged.retain(|(p, _)| !p.is_empty());
+    merged
 }
 
 #[cfg(test)]
@@ -243,7 +270,13 @@ mod tests {
         let h = "<html><head><title>T</title><style>p{a:b}</style></head><body><h1>Chapter&nbsp;One</h1>\
                  <p>It was a <em>dark</em> night &amp; cold.<br/>Line two.</p><script>if (a<b) x()</script>\
                  <!-- note --><p class=\"x > y\">Caf&#233; &#x2014; end</p><nav><p>skip</p></nav></body></html>";
-        assert_eq!(html_paragraphs(h), ["Chapter One", "It was a dark night & cold.", "Line two.", "Café — end"]);
+        let blocks = html_blocks(h);
+        let paras: Vec<&str> = blocks.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paras, ["Chapter One", "It was a dark night & cold.", "Line two.", "Café — end"]);
+        assert_eq!(blocks.iter().map(|(_, h)| *h).collect::<Vec<_>>(), [true, false, false, false]);
+        // a heading in two lines is one heading
+        let two = html_blocks("<h2>Chapter I<br/>The Tomb</h2><p>Text.</p><h3>II</h3>");
+        assert_eq!(two, [("Chapter I · The Tomb".to_string(), true), ("Text.".to_string(), false), ("II".to_string(), true)]);
     }
 
     #[test]

@@ -136,10 +136,26 @@ pub fn to_paragraphs_named(data: &[u8], name: &str) -> Option<Vec<String>> {
 /// Read any supported document as plain-text paragraphs, saying why on failure.
 /// `name` is the file name, used only to tell Markdown from plain text.
 pub fn read(data: &[u8], name: &str) -> Result<Vec<String>, ReadError> {
+    read_book(data, name).map(|b| b.paras)
+}
+
+/// A document's paragraphs and what its markup says about their structure.
+#[derive(Debug, Default)]
+pub struct Book {
+    pub paras: Vec<String>,
+    /// Paragraphs that are major headings (HTML and EPUB h1 to h3).
+    pub headings: Vec<usize>,
+    /// Where each of an EPUB's files starts; each is usually a chapter.
+    pub parts: Vec<usize>,
+}
+
+/// Like `read`, keeping the headings and parts the document's markup marks.
+pub fn read_book(data: &[u8], name: &str) -> Result<Book, ReadError> {
     let kind = kind(data, name).ok_or(ReadError::Unsupported)?;
     if data.len() > if kind == Kind::Pdf { MAX_PDF } else { MAX_FILE } {
         return Err(ReadError::Unsupported);
     }
+    let mut book = Book::default();
     let paras = match kind {
         Kind::Word => text::paragraphs(&to_rtf(data).ok_or(ReadError::Unsupported)?),
         Kind::Pdf => pdf::paragraphs(data).map_err(|e| match e {
@@ -152,14 +168,18 @@ pub fn read(data: &[u8], name: &str) -> Result<Vec<String>, ReadError> {
             let xml = zip::extract(data, "content.xml", MAX_XML).ok_or(ReadError::Unsupported)?;
             odt::paragraphs(&String::from_utf8_lossy(&xml))
         }
-        Kind::Epub => epub::paragraphs(data).ok_or(ReadError::Unsupported)?,
+        Kind::Epub => {
+            let (blocks, parts) = epub::blocks(data).ok_or(ReadError::Unsupported)?;
+            book.parts = parts;
+            outline(&mut book, blocks)
+        }
         Kind::Html | Kind::Markdown | Kind::Text => {
             let text = plain::decode(data);
             if looks_binary(&text) {
                 return Err(ReadError::Unsupported);
             }
             match kind {
-                Kind::Html => markup::html_paragraphs(&text),
+                Kind::Html => outline(&mut book, markup::html_blocks(&text)),
                 Kind::Markdown => plain::markdown_paragraphs(&text),
                 _ => plain::paragraphs(&text),
             }
@@ -168,7 +188,14 @@ pub fn read(data: &[u8], name: &str) -> Result<Vec<String>, ReadError> {
     if paras.is_empty() {
         return Err(ReadError::NoText);
     }
-    Ok(paras)
+    book.paras = paras;
+    Ok(book)
+}
+
+/// Note which blocks are headings, and return the paragraphs.
+fn outline(book: &mut Book, blocks: Vec<markup::Block>) -> Vec<String> {
+    book.headings = blocks.iter().enumerate().filter(|(_, (_, h))| *h).map(|(i, _)| i).collect();
+    blocks.into_iter().map(|(p, _)| p).collect()
 }
 
 /// Render any supported document to RTF for display: Word documents keep their

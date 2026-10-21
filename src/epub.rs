@@ -1,6 +1,6 @@
 //! EPUB e-books: chapters in reading (spine) order, as paragraphs.
 
-use crate::markup::{attr, events, html_paragraphs, Ev};
+use crate::markup::{attr, events, html_blocks, Block, Ev};
 use crate::zip;
 
 /// Most chapter files read from one book, and their total size.
@@ -42,8 +42,9 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The book's text, or None if this isn't a readable EPUB.
-pub fn paragraphs(z: &[u8]) -> Option<Vec<String>> {
+/// The book's text, or None if this isn't a readable EPUB: its paragraphs (each
+/// marked if it's a heading), and where each of its files (usually a chapter) starts.
+pub fn blocks(z: &[u8]) -> Option<(Vec<Block>, Vec<usize>)> {
     let text = |path: &str, max: usize| zip::extract(z, path, max).map(|b| String::from_utf8_lossy(&b).into_owned());
     // META-INF/container.xml names the package file
     let container = text("META-INF/container.xml", 1 << 20)?;
@@ -78,17 +79,22 @@ pub fn paragraphs(z: &[u8]) -> Option<Vec<String>> {
     });
 
     let mut out = Vec::new();
+    let mut parts = Vec::new();
     let mut total = 0;
     for id in spine.iter().take(MAX_ITEMS) {
         let Some((_, href)) = manifest.iter().find(|(m, _)| m == id) else { continue };
         let Some(page) = text(&resolve(&base, href), MAX_TOTAL - total) else { continue };
         total += page.len();
-        out.extend(html_paragraphs(&page));
+        let page = html_blocks(&page);
+        if !page.is_empty() {
+            parts.push(out.len());
+        }
+        out.extend(page);
         if total >= MAX_TOTAL {
             break;
         }
     }
-    (!out.is_empty()).then_some(out)
+    (!out.is_empty()).then_some((out, parts))
 }
 
 #[cfg(test)]
