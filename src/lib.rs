@@ -147,6 +147,9 @@ pub struct Book {
     pub headings: Vec<usize>,
     /// Where each of an EPUB's files starts; each is usually a chapter.
     pub parts: Vec<usize>,
+    /// The story itself, without an EPUB's front and back matter (cover, title
+    /// page, contents; notes, index, ads); all the paragraphs for other formats.
+    pub body: std::ops::Range<usize>,
 }
 
 /// Like `read`, keeping the headings and parts the document's markup marks.
@@ -169,8 +172,9 @@ pub fn read_book(data: &[u8], name: &str) -> Result<Book, ReadError> {
             odt::paragraphs(&String::from_utf8_lossy(&xml))
         }
         Kind::Epub => {
-            let (blocks, parts) = epub::blocks(data).ok_or(ReadError::Unsupported)?;
+            let (blocks, parts, body) = epub::blocks(data).ok_or(ReadError::Unsupported)?;
             book.parts = parts;
+            book.body = body;
             outline(&mut book, blocks)
         }
         Kind::Html | Kind::Markdown | Kind::Text => {
@@ -187,6 +191,9 @@ pub fn read_book(data: &[u8], name: &str) -> Result<Book, ReadError> {
     };
     if paras.is_empty() {
         return Err(ReadError::NoText);
+    }
+    if kind != Kind::Epub {
+        book.body = 0..paras.len();
     }
     book.paras = paras;
     Ok(book)

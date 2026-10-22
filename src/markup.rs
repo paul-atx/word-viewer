@@ -192,9 +192,27 @@ fn named(e: &str) -> Option<char> {
 /// A paragraph, and whether it is a major heading.
 pub type Block = (String, bool);
 
+/// A footnote marker's text: a few digits or note symbols, maybe bracketed ("1", "[12]", "*").
+fn note_marker(t: &str) -> bool {
+    let t = t.trim().trim_start_matches(['[', '(']).trim_end_matches([']', ')']);
+    (1..=4).contains(&t.chars().count()) && t.chars().all(|c| c.is_ascii_digit() || "*†‡§¶".contains(c))
+}
+
+/// Whether a tag is a footnote body (an EPUB pop-up note) or a link to one.
+fn is_note(local: &str, attrs: &str) -> bool {
+    let types = format!("{} {}", attr(attrs, "epub:type").unwrap_or_default(), attr(attrs, "role").unwrap_or_default());
+    let has = |t: &str| types.split_whitespace().any(|x| x == t);
+    match local {
+        "a" => has("noteref") || has("doc-noteref"),
+        "aside" => ["footnote", "endnote", "rearnote", "note", "doc-footnote", "doc-endnote"].iter().any(|t| has(t)),
+        _ => false,
+    }
+}
+
 /// Paragraphs of readable text from an HTML or XHTML page, each marked if it's a
 /// major heading (h1 to h3). Block elements start new paragraphs; scripts, styles,
-/// the document head and navigation are skipped.
+/// the document head and navigation are skipped, and so are footnotes: pop-up
+/// note bodies, and the markers that link to them (a superscript or linked "1").
 pub fn html_blocks(html: &str) -> Vec<Block> {
     const BLOCKS: [&str; 22] = [
         "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "br", "tr", "section", "article",
@@ -206,6 +224,8 @@ pub fn html_blocks(html: &str) -> Vec<Block> {
     let mut cur = String::new();
     let mut skip: Vec<String> = Vec::new();
     let mut heading = false; // inside h1-h3
+    // open <sup> and in-page links, and where their text starts in `cur`
+    let mut marks: Vec<(String, usize)> = Vec::new();
     let flush = |cur: &mut String, out: &mut Vec<Block>, heading: bool| {
         let p = cur.split_whitespace().collect::<Vec<_>>().join(" ");
         if !p.is_empty() {
@@ -214,12 +234,23 @@ pub fn html_blocks(html: &str) -> Vec<Block> {
         cur.clear();
     };
     events(html, |ev| match ev {
-        Ev::Start(name, _, self_closing) => {
+        Ev::Start(name, attrs, self_closing) => {
             let local = name.rsplit(':').next().unwrap_or(&name).to_string();
-            if !self_closing && SKIP.contains(&local.as_str()) {
-                skip.push(local);
-            } else if skip.is_empty() && BLOCKS.contains(&local.as_str()) {
+            if self_closing {
+                // nothing inside; only a line break matters
+            } else if skip.last() == Some(&local) || SKIP.contains(&local.as_str()) || skip.is_empty() && is_note(&local, attrs) {
+                skip.push(local); // a nested tag of the same name counts too, so its end isn't the skip's end
+                return;
+            }
+            if !skip.is_empty() {
+                return;
+            }
+            if !self_closing && (local == "sup" || local == "a" && attr(attrs, "href").is_some_and(|h| h.contains('#'))) {
+                marks.push((local.clone(), cur.len()));
+            }
+            if BLOCKS.contains(&local.as_str()) {
                 flush(&mut cur, &mut out, heading);
+                marks.clear();
                 if HEADINGS.contains(&local.as_str()) {
                     heading = true;
                     out.push((String::new(), true)); // marks the start of this heading
@@ -230,8 +261,16 @@ pub fn html_blocks(html: &str) -> Vec<Block> {
             let local = name.rsplit(':').next().unwrap_or(&name);
             if skip.last().is_some_and(|s| s == local) {
                 skip.pop();
-            } else if skip.is_empty() && BLOCKS.contains(&local) {
+            } else if !skip.is_empty() {
+                // inside something skipped
+            } else if marks.last().is_some_and(|(m, _)| m == local) {
+                let (_, at) = marks.pop().expect("checked");
+                if cur.get(at..).is_some_and(note_marker) {
+                    cur.truncate(at);
+                }
+            } else if BLOCKS.contains(&local) {
                 flush(&mut cur, &mut out, heading);
+                marks.clear();
                 if HEADINGS.contains(&local) {
                     heading = false;
                 }
@@ -277,6 +316,15 @@ mod tests {
         // a heading in two lines is one heading
         let two = html_blocks("<h2>Chapter I<br/>The Tomb</h2><p>Text.</p><h3>II</h3>");
         assert_eq!(two, [("Chapter I · The Tomb".to_string(), true), ("Text.".to_string(), false), ("II".to_string(), true)]);
+    }
+
+    #[test]
+    fn footnotes() {
+        let h = r##"<p>He fell.<sup><a href="#fn1" epub:type="noteref">1</a></sup> Then rose<a href="#n2">[2]</a> on the 1<sup>st</sup>.</p>
+            <aside epub:type="footnote" id="fn1"><div><p>A note.</p></div><p>More.</p></aside>
+            <p>See <a href="#ch2">chapter 2</a>, x<sup>*</sup>.</p>"##;
+        let paras: Vec<String> = html_blocks(h).into_iter().map(|(p, _)| p).collect();
+        assert_eq!(paras, ["He fell. Then rose on the 1st.", "See chapter 2, x."]);
     }
 
     #[test]
