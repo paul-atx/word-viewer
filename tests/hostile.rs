@@ -118,6 +118,66 @@ fn cyclic_compound_file_is_rejected() {
     assert!(quick(|| word_viewer::to_rtf(&z)).is_none());
 }
 
+#[test]
+fn docx_hidden_text_is_not_shown() {
+    let xml = br"<w:p><w:r><w:t>Shown </w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t>SECRET</w:t></w:r><w:r><w:t>again</w:t></w:r></w:p>";
+    let rtf = word_viewer::to_rtf(&zip("word/document.xml", xml, xml.len() as u32, 0)).unwrap();
+    assert!(rtf.contains("Shown") && rtf.contains("again") && !rtf.contains("SECRET"));
+}
+
+// ---- legacy Word (.doc) ----
+
+/// Saved by OpenOffice as Word 97: a title, headings, bold/italic/underline, a
+/// bulleted list, a hyperlink field, a table with an empty cell, hidden text,
+/// and a deletion and an insertion made with change tracking on.
+const DOC: &[u8] = include_bytes!("fixtures/sample.doc");
+
+#[test]
+fn doc_renders_with_formatting() {
+    let rtf = word_viewer::to_rtf(DOC).expect("sample.doc should render");
+    for want in [
+        r"{\b\fs52 Garden Notes}",
+        r"{\b\fs40 First Section}",
+        r"{\b\fs32 Shopping List}",
+        r"{\b bold}",
+        r"{\i italic}",
+        r"{\ul underlined}",
+        r"\bullet\tab Seeds",
+        "See the website for more.", // the field's result, not its code
+    ] {
+        assert!(rtf.contains(want), "missing {want} in {rtf}");
+    }
+    // headings are in an outline-numbering list, but aren't bullets
+    assert!(!rtf.contains(r"\bullet\tab {\b"));
+}
+
+#[test]
+fn doc_deleted_and_hidden_text_is_not_shown() {
+    let rtf = word_viewer::to_rtf(DOC).unwrap();
+    assert!(rtf.contains("Visible start. Visible middle. Visible end.") && rtf.contains("INSERTED-WORDS"));
+    assert!(!rtf.contains("DELETED-WORDS") && !rtf.contains("HIDDEN-TEXT"));
+}
+
+#[test]
+fn doc_table_rows_survive_an_empty_cell() {
+    let paras = word_viewer::read(DOC, "sample.doc").unwrap();
+    for row in ["Plant Count Notes", "Tomato 12", "Basil 30 Pots", "After the table."] {
+        assert!(paras.iter().any(|p| p == row), "missing row {row:?} in {paras:?}");
+    }
+}
+
+#[test]
+fn doc_survives_truncation_and_corruption() {
+    for n in (0..DOC.len()).step_by(7) {
+        let _ = word_viewer::to_rtf(&DOC[..n]);
+    }
+    for i in 0..DOC.len() {
+        let mut d = DOC.to_vec();
+        d[i] ^= 0xFF;
+        let _ = word_viewer::to_rtf(&d);
+    }
+}
+
 // ---- every other format (PDF, RTF, ODT, EPUB, HTML, text) ----
 
 fn read_quick(data: &[u8], name: &str) -> Result<Vec<String>, word_viewer::ReadError> {

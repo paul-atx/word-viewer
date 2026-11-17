@@ -3,7 +3,7 @@
 A tiny, read-only document viewer for Windows. One small exe, no installer, no dependencies.
 
 - Opens Word (`.docx`, `.doc`), PDF, RTF, OpenDocument (`.odt`), EPUB, HTML, Markdown and plain text
-- Word documents show headings, bold, italic, underline, bullets, simple tables and indents; other formats show their text as paragraphs
+- Word documents (`.docx` and `.doc`) show headings, bold, italic, underline, bullets, simple tables and indents; like Word, hidden text and text deleted with change tracking on are left out. Other formats show their text as paragraphs
 - PDFs: text is rebuilt into paragraphs (words hyphenated across lines joined, page numbers and running headers removed). Scanned PDFs have no text to show, and password-protected PDFs aren't supported yet
 - Never modifies the file; text can be selected and copied
 

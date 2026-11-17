@@ -15,7 +15,24 @@ impl Rtf {
         r
     }
 
-    /// Append trusted RTF markup (never document content).
+    /// An empty buffer for part of a document (no RTF header), to be appended
+    /// to the main one with `put` once it is complete.
+    pub fn fragment() -> Rtf {
+        Rtf { buf: String::new(), full: false }
+    }
+
+    /// Bytes written so far.
+    pub fn size(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Take what has been written, leaving the buffer empty.
+    pub fn take(&mut self) -> String {
+        std::mem::take(&mut self.buf)
+    }
+
+    /// Append trusted RTF markup (never document content), or RTF built by this
+    /// type, whose document content is already escaped.
     pub fn put(&mut self, s: &str) {
         if self.full || self.buf.len() + s.len() > MAX_RTF {
             self.full = true;

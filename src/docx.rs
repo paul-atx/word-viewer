@@ -57,7 +57,7 @@ fn text(r: &mut Rtf, raw: &[u8]) {
 pub fn render(x: &[u8]) -> String {
     const HEAD: [&str; 5] = ["", "\\b\\fs40 ", "\\b\\fs32 ", "\\b\\fs28 ", "\\b\\fs52 "];
     let mut r = Rtf::new();
-    let (mut bold, mut ital, mut under, mut head) = (false, false, false, 0);
+    let (mut bold, mut ital, mut under, mut vanish, mut head) = (false, false, false, false, 0);
     let (mut bullet, mut intbl, mut skip, mut inppr, mut cell) = (false, false, false, false, 0);
     let mut p = 0;
     while !r.full {
@@ -105,7 +105,8 @@ pub fn render(x: &[u8]) -> String {
                     r.put(&format!("\\fi{} ", fi.clamp(-14400, 14400)));
                 }
             }
-            b"w:r" if !close => (bold, ital, under) = (false, false, false),
+            b"w:r" if !close => (bold, ital, under, vanish) = (false, false, false, false),
+            b"w:vanish" if !close => vanish = on(tag), // hidden text: Word doesn't show or print it
             b"w:b" if !close => bold = on(tag),
             b"w:i" if !close => ital = on(tag),
             b"w:u" if !close => under = on(tag),
@@ -130,6 +131,10 @@ pub fn render(x: &[u8]) -> String {
             }
             b"w:t" if !close && !selfclose => {
                 let Some(te) = find(x, p, b"</w:t>") else { break };
+                if vanish {
+                    p = te + 6;
+                    continue;
+                }
                 r.put("{");
                 r.put(HEAD[head]);
                 if bold {
